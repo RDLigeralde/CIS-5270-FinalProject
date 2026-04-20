@@ -27,9 +27,9 @@ def _halstead(code: str) -> dict:
             return {"volume": 0.0, "difficulty": 0.0, "effort": 0.0}
         total = result[0]
         return {
-            "volume": total.total.volume,
-            "difficulty": total.total.difficulty,
-            "effort": total.total.effort,
+            "volume": total.volume,
+            "difficulty": total.difficulty,
+            "effort": total.effort,
         }
     except Exception:
         return {"volume": 0.0, "difficulty": 0.0, "effort": 0.0}
@@ -207,7 +207,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     records = load_jsonl(args.solutions)
-    canonical = [r["canonical_solution"] for r in records if r.get("canonical_solution")]
+    canonical = [r["prompt"] + r["canonical_solution"] for r in records if r.get("canonical_solution")]
     print(f"Computing distribution from {len(canonical)} canonical solutions...")
     dist = HumanDistribution.from_solutions(canonical)
     dist.save(args.out)
