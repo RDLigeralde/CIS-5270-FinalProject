@@ -3,6 +3,7 @@
 # Usage: ./make.sh <target> [options]
 #
 # Targets:
+#   fetch           Download data_files/ from Google Drive (or --local PATH)
 #   generate        Step 3-1: generate LLM solutions (--n N to limit problems)
 #   prepare         Step 3-2: build SFT / DPO / RFT datasets
 #   human_dist      Step 3-3: pre-compute human reference distribution
@@ -30,6 +31,10 @@ TARGET="${1:-help}"
 shift || true          # remaining args forwarded to the script
 
 case "$TARGET" in
+  fetch)
+    python scripts/fetch_data.py "$@"
+    ;;
+
   generate)
     python scripts/generate_solutions.py "$@"
     ;;
@@ -75,6 +80,7 @@ case "$TARGET" in
     echo "Usage: ./make.sh <target> [options]"
     echo ""
     echo "Targets:"
+    echo "  fetch       [--local PATH]       Download data_files/ from Google Drive (or local dir)"
     echo "  generate    [--n N]              Generate LLM solutions from EvalPlus"
     echo "  prepare                          Build SFT / DPO / RFT datasets"
     echo "  human_dist                       Pre-compute human reference distribution"
