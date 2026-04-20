@@ -7,7 +7,7 @@ from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import TEACHER_MODEL, RAW_SOLUTIONS_FILE, N_SOLUTIONS_PER_PROBLEM
-from utils import get_openai_client, save_jsonl
+from scripts.utils import get_openai_client, save_jsonl
 
 from evalplus.data import get_human_eval_plus
 from tqdm import tqdm

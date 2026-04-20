@@ -9,7 +9,7 @@ from config import (
     DPO_EPOCHS, BATCH_SIZE, LR_MULTIPLIER,
     DATA_DIR,
 )
-from utils import get_openai_client, upload_file, wait_for_job
+from scripts.utils import get_openai_client, upload_file, wait_for_job
 
 SFT_MODEL_ID_PATH = f"{DATA_DIR}/sft_model_id.txt"
 DPO_MODEL_ID_PATH = f"{DATA_DIR}/dpo_model_id.txt"

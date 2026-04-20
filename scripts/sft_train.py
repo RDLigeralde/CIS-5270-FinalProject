@@ -9,7 +9,7 @@ from config import (
     SFT_EPOCHS, BATCH_SIZE, LR_MULTIPLIER,
     DATA_DIR,
 )
-from utils import get_openai_client, upload_file, wait_for_job
+from scripts.utils import get_openai_client, upload_file, wait_for_job
 
 MODEL_ID_PATH = f"{DATA_DIR}/sft_model_id.txt"
 

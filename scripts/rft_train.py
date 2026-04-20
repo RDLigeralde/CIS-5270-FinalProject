@@ -19,7 +19,7 @@ from config import (
     CORRECTNESS_WEIGHT, STYLE_WEIGHT,
     DATA_DIR,
 )
-from utils import get_openai_client, upload_file, wait_for_job
+from scripts.utils import get_openai_client, upload_file, wait_for_job
 
 DPO_MODEL_ID_PATH = f"{DATA_DIR}/dpo_model_id.txt"
 RFT_MODEL_ID_PATH = f"{DATA_DIR}/rft_model_id.txt"

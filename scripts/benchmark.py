@@ -10,7 +10,7 @@ from config import (
     CORRECTNESS_WEIGHT, STYLE_WEIGHT,
     DATA_DIR,
 )
-from utils import get_openai_client, load_jsonl, save_jsonl
+from scripts.utils import get_openai_client, load_jsonl, save_jsonl
 from llm_judge import judge_style
 from verified_rewards import static_style_score, HumanDistribution
 

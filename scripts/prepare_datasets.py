@@ -26,7 +26,7 @@ from config import (
     RFT_TRAIN_FILE, RFT_VAL_FILE,
     VAL_SPLIT,
 )
-from utils import load_jsonl, save_jsonl
+from scripts.utils import load_jsonl, save_jsonl
 
 SYSTEM_PROMPT = (
     "You are an expert Python programmer who refactors verbose, LLM-generated code "

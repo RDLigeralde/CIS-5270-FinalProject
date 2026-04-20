@@ -197,7 +197,7 @@ def full_static_reward(
 
 if __name__ == "__main__":
     import argparse
-    from utils import load_jsonl
+    from scripts.utils import load_jsonl
 
     parser = argparse.ArgumentParser(description="Pre-compute human reference distribution.")
     parser.add_argument("--solutions", default="data_files/llm_solutions.jsonl",

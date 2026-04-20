@@ -116,7 +116,7 @@ def batch_judge(client, items: list[dict]) -> list[float]:
 
 if __name__ == "__main__":
     import argparse
-    from utils import get_openai_client, load_jsonl, save_jsonl
+    from scripts.utils import get_openai_client, load_jsonl, save_jsonl
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, help="JSONL with problem, reference, generated fields")
