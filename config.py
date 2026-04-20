@@ -42,3 +42,6 @@ LR_MULTIPLIER     = 1.0
 # Number of solutions to generate per problem
 N_SOLUTIONS_PER_PROBLEM = 3  # mix of correct + incorrect
 VAL_SPLIT = 0.1
+
+# Weights & Biases
+WANDB_PROJECT = os.getenv("WANDB_PROJECT", "5270fp-finetuning")

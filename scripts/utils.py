@@ -1,3 +1,5 @@
+import csv
+import io
 import os
 import json
 import time
@@ -5,6 +7,37 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import *
+
+try:
+    import wandb as _wandb
+    _WANDB_AVAILABLE = True
+except ImportError:
+    _wandb = None
+    _WANDB_AVAILABLE = False
+
+
+class WandbLogger:
+    """Thin wrapper around wandb. Uses the system-wide login (wandb login).
+    Pass disabled=True to opt out."""
+
+    def __init__(self, project: str, experiment: str | None, config: dict, disabled: bool = False):
+        self._run = None
+        if disabled:
+            return
+        if not _WANDB_AVAILABLE:
+            raise RuntimeError("wandb is not installed. Run: pip install wandb  (or pass --no-wandb)")
+        self._run = _wandb.init(project=project, name=experiment, config=config)
+
+    def log(self, metrics: dict, step: int | None = None):
+        if self._run:
+            self._run.log(metrics, step=step)
+
+    def finish(self):
+        if self._run:
+            self._run.finish()
+
+    def __bool__(self):
+        return self._run is not None
 
 from openai import AzureOpenAI
 from azure.identity import DefaultAzureCredential
@@ -42,14 +75,60 @@ def upload_file(client: AzureOpenAI, path: str, purpose: str = "fine-tune") -> s
     return result.id
 
 
-def wait_for_job(client: AzureOpenAI, job_id: str, poll_interval: int = 30) -> object:
+def wait_for_job(
+    client: AzureOpenAI,
+    job_id: str,
+    poll_interval: int = 30,
+    wandb_logger: "WandbLogger | None" = None,
+) -> object:
     """Poll a fine-tuning job until it reaches a terminal state."""
+    poll = 0
     while True:
         job = client.fine_tuning.jobs.retrieve(job_id)
         print(f"  [{job_id}] status: {job.status}")
+        if wandb_logger:
+            wandb_logger.log({"job/status_code": _status_to_int(job.status)}, step=poll)
         if job.status in ("succeeded", "failed", "cancelled"):
             return job
+        poll += 1
         time.sleep(poll_interval)
+
+
+def _status_to_int(status: str) -> int:
+    return {"queued": 0, "running": 1, "succeeded": 2, "failed": -1, "cancelled": -2}.get(status, 0)
+
+
+def log_job_result(client: AzureOpenAI, job: object, wandb_logger: "WandbLogger") -> None:
+    """Download result files from a completed job and log per-step metrics to wandb."""
+    if not wandb_logger:
+        return
+    result_files = getattr(job, "result_files", None) or []
+    for file_id in result_files:
+        try:
+            content = client.files.content(file_id).read().decode("utf-8")
+            reader = csv.DictReader(io.StringIO(content))
+            for row in reader:
+                step = int(row.get("step", 0))
+                metrics = {}
+                for k, v in row.items():
+                    if k == "step" or v == "":
+                        continue
+                    try:
+                        metrics[k] = float(v)
+                    except ValueError:
+                        pass
+                if metrics:
+                    wandb_logger.log(metrics, step=step)
+        except Exception as exc:
+            print(f"  Warning: could not parse result file {file_id}: {exc}")
+
+    summary = {}
+    if getattr(job, "trained_tokens", None) is not None:
+        summary["trained_tokens"] = job.trained_tokens
+    if getattr(job, "fine_tuned_model", None):
+        summary["fine_tuned_model"] = job.fine_tuned_model
+    if summary:
+        wandb_logger.log(summary)
 
 
 def deploy_model(

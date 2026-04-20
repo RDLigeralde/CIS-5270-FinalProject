@@ -78,9 +78,9 @@ case "$TARGET" in
     echo "  generate    [--n N]              Generate LLM solutions from EvalPlus"
     echo "  prepare                          Build SFT / DPO / RFT datasets"
     echo "  human_dist                       Pre-compute human reference distribution"
-    echo "  sft         [--no-wait]          SFT warm-start fine-tune"
-    echo "  dpo         [--base-model ID]    DPO preference fine-tune"
-    echo "  rft         [--base-model ID]    RFT/PPO fine-tune"
+    echo "  sft         [--no-wait] [--no-wandb] [--project P] [--experiment N]"
+    echo "  dpo         [--base-model ID] [--no-wandb] [--project P] [--experiment N]"
+    echo "  rft         [--base-model ID] [--gated-style] [--no-wandb] [--project P] [--experiment N]"
     echo "  benchmark   [--n N]              Evaluate all models (default: 50 problems)"
     echo "  all         [--n N]              Run full pipeline end-to-end"
     ;;
