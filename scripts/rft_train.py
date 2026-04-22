@@ -164,6 +164,7 @@ def run_rft(base_model: str | None = None, wait: bool = True, gated_style: bool 
         },
         disabled=no_wandb,
     )
+    wb.define_rft_charts()
 
     print("=== RFT/PPO Training ===")
     print(f"Base model: {base_model}")

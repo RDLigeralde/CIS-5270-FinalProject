@@ -30,6 +30,7 @@ def run_sft(wait: bool = True, no_wandb: bool = False, project: str = WANDB_PROJ
         },
         disabled=no_wandb,
     )
+    wb.define_sft_charts()
 
     print("=== SFT Warm-start ===")
     train_id = upload_file(client, SFT_TRAIN_FILE)

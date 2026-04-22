@@ -44,6 +44,7 @@ def run_dpo(base_model: str | None = None, wait: bool = True, no_wandb: bool = F
         },
         disabled=no_wandb,
     )
+    wb.define_dpo_charts()
 
     print("=== DPO Training ===")
     print(f"Base model: {base_model}")

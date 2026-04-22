@@ -28,6 +28,36 @@ class WandbLogger:
             raise RuntimeError("wandb is not installed. Run: pip install wandb  (or pass --no-wandb)")
         self._run = _wandb.init(project=project, name=experiment, config=config)
 
+    def define_sft_charts(self):
+        if not self._run:
+            return
+        for metric in (
+            "train/loss", "val/loss", "val/full_loss",
+            "train/token_accuracy", "val/token_accuracy", "val/full_token_accuracy",
+        ):
+            _wandb.define_metric(metric, step_metric="step")
+
+    def define_dpo_charts(self):
+        if not self._run:
+            return
+        for metric in (
+            "train/loss", "val/loss", "val/full_loss",
+            "train/token_accuracy", "val/token_accuracy", "val/full_token_accuracy",
+            "train/reward_accuracy", "val/reward_accuracy",
+            "train/reward_margin", "val/reward_margin",
+        ):
+            _wandb.define_metric(metric, step_metric="step")
+
+    def define_rft_charts(self):
+        if not self._run:
+            return
+        for metric in (
+            "train/loss", "val/loss",
+            "train/reward", "val/reward",
+            "train/kl_divergence",
+        ):
+            _wandb.define_metric(metric, step_metric="step")
+
     def log(self, metrics: dict, step: int | None = None):
         if self._run:
             self._run.log(metrics, step=step)
@@ -98,6 +128,27 @@ def _status_to_int(status: str) -> int:
     return {"queued": 0, "running": 1, "succeeded": 2, "failed": -1, "cancelled": -2}.get(status, 0)
 
 
+_SFT_COLUMN_MAP = {
+    # shared (SFT + DPO)
+    "train_loss": "train/loss",
+    "valid_loss": "val/loss",
+    "full_valid_loss": "val/full_loss",
+    "train_mean_token_accuracy": "train/token_accuracy",
+    "valid_mean_token_accuracy": "val/token_accuracy",
+    "full_valid_mean_token_accuracy": "val/full_token_accuracy",
+    # DPO-specific
+    "train_reward_accuracy": "train/reward_accuracy",
+    "valid_reward_accuracy": "val/reward_accuracy",
+    "train_reward_margin": "train/reward_margin",
+    "valid_reward_margin": "val/reward_margin",
+    # RFT-specific
+    "train_reward": "train/reward",
+    "valid_reward": "val/reward",
+    "train_kl": "train/kl_divergence",
+    "train_kl_divergence": "train/kl_divergence",
+}
+
+
 def log_job_result(client: AzureOpenAI, job: object, wandb_logger: "WandbLogger") -> None:
     """Download result files from a completed job and log per-step metrics to wandb."""
     if not wandb_logger:
@@ -114,7 +165,7 @@ def log_job_result(client: AzureOpenAI, job: object, wandb_logger: "WandbLogger"
                     if k == "step" or v == "":
                         continue
                     try:
-                        metrics[k] = float(v)
+                        metrics[_SFT_COLUMN_MAP.get(k, k)] = float(v)
                     except ValueError:
                         pass
                 if metrics:
