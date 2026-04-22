@@ -35,7 +35,7 @@ class WandbLogger:
             "train/loss", "val/loss", "val/full_loss",
             "train/token_accuracy", "val/token_accuracy", "val/full_token_accuracy",
         ):
-            _wandb.define_metric(metric, step_metric="step")
+            _wandb.define_metric(metric, step_metric="azure_step")
 
     def define_dpo_charts(self):
         if not self._run:
@@ -46,7 +46,7 @@ class WandbLogger:
             "train/reward_accuracy", "val/reward_accuracy",
             "train/reward_margin", "val/reward_margin",
         ):
-            _wandb.define_metric(metric, step_metric="step")
+            _wandb.define_metric(metric, step_metric="azure_step")
 
     def define_rft_charts(self):
         if not self._run:
@@ -56,7 +56,7 @@ class WandbLogger:
             "train/reward", "val/reward",
             "train/kl_divergence",
         ):
-            _wandb.define_metric(metric, step_metric="step")
+            _wandb.define_metric(metric, step_metric="azure_step")
 
     def log(self, metrics: dict, step: int | None = None):
         if self._run:
@@ -112,15 +112,13 @@ def wait_for_job(
     wandb_logger: "WandbLogger | None" = None,
 ) -> object:
     """Poll a fine-tuning job until it reaches a terminal state."""
-    poll = 0
     while True:
         job = client.fine_tuning.jobs.retrieve(job_id)
         print(f"  [{job_id}] status: {job.status}")
         if wandb_logger:
-            wandb_logger.log({"job/status_code": _status_to_int(job.status)}, step=poll)
+            wandb_logger.log({"job/status_code": _status_to_int(job.status)})
         if job.status in ("succeeded", "failed", "cancelled"):
             return job
-        poll += 1
         time.sleep(poll_interval)
 
 
@@ -150,7 +148,7 @@ _SFT_COLUMN_MAP = {
 
 
 def log_job_result(client: AzureOpenAI, job: object, wandb_logger: "WandbLogger") -> None:
-    """Download result files from a completed job and log per-step metrics to wandb."""
+    """Download result files from a completed job and log metrics to wandb."""
     if not wandb_logger:
         return
     result_files = getattr(job, "result_files", None) or []
@@ -169,7 +167,8 @@ def log_job_result(client: AzureOpenAI, job: object, wandb_logger: "WandbLogger"
                     except ValueError:
                         pass
                 if metrics:
-                    wandb_logger.log(metrics, step=step)
+                    metrics["azure_step"] = step
+                    wandb_logger.log(metrics)
         except Exception as exc:
             print(f"  Warning: could not parse result file {file_id}: {exc}")
 
