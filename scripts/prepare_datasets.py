@@ -97,10 +97,12 @@ def make_dpo_records(problems: list[dict]) -> list[dict]:
         for sol in correct:
             user_msg = _user_message(problem_desc, sol["code"])
             records.append({
-                "input": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_msg},
-                ],
+                "input": {
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_msg},
+                    ]
+                },
                 "preferred_output": [
                     {"role": "assistant", "content": _assistant_message(canonical)}
                 ],
@@ -116,10 +118,12 @@ def make_dpo_records(problems: list[dict]) -> list[dict]:
             rejected_sol = random.choice(incorrect)
             user_msg = _user_message(problem_desc, canonical)
             records.append({
-                "input": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_msg},
-                ],
+                "input": {
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_msg},
+                    ]
+                },
                 "preferred_output": [
                     {"role": "assistant", "content": _assistant_message(chosen_sol["code"])}
                 ],
