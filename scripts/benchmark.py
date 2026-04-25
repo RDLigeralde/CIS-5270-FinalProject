@@ -92,11 +92,6 @@ def generate_refactored(
     try:
         user_msg = (
             f"Refactor the following LLM-written solution to be more idiomatic and human-like.\n\n"
-            # "Output only one complete Python function with the same signature.\n"
-            # "- Return exactly one top-level function definition.\n"
-            # "- Keep the same function name and parameter list.\n"
-            # "- Keep behavior identical to the original solution.\n"
-            # "- Output executable Python code only.\n\n"
             f"Problem:\n{problem_desc.strip()}\n\n"
             f"LLM solution:\n```python\n{llm_code.strip()}\n```"
         )
