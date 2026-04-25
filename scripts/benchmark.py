@@ -3,7 +3,6 @@ import os
 import threading
 import argparse
 import re
-import textwrap
 from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -84,51 +83,6 @@ def _strip_fences(code: str) -> str:
     return text
 
 
-def _extract_function_scaffold(problem_desc: str) -> tuple[list[str], str] | None:
-    """Extract imports and first function signature from the prompt block."""
-    lines = problem_desc.strip().splitlines()
-    imports: list[str] = []
-    signature: str | None = None
-
-    for line in lines:
-        s = line.strip()
-        if s.startswith(("from ", "import ")):
-            imports.append(s)
-        if signature is None and re.match(r"^def\s+[A-Za-z_][A-Za-z0-9_]*\s*\(.*\)\s*:\s*$", s):
-            signature = s
-
-    if signature is None:
-        return None
-    return imports, signature
-
-
-def _normalize_generated_code(problem_desc: str, generated: str) -> str:
-    """Best-effort recovery for fragment outputs that are not full function definitions."""
-    src = generated.strip()
-    if not src:
-        return src
-
-    # Already a full function output.
-    if re.search(r"^\s*def\s+", src, flags=re.MULTILINE):
-        return src
-
-    scaffold = _extract_function_scaffold(problem_desc)
-    if scaffold is None:
-        return src
-
-    imports, signature = scaffold
-    body = textwrap.dedent(src).strip("\n")
-    if not body:
-        body = "pass"
-    indented = "\n".join(f"    {line}" if line.strip() else "" for line in body.splitlines())
-    wrapped = f"{signature}\n{indented}"
-
-    # Avoid duplicate import lines when model already emitted them in fragment text.
-    if imports:
-        return "\n".join(imports) + "\n\n" + wrapped
-    return wrapped
-
-
 def generate_refactored(
     client,
     deployment: str,
@@ -187,7 +141,6 @@ def evaluate_model(
         generated = generate_refactored(client, deployment, problem_desc, input_code)
         if generated is None:
             continue
-        # generated = _normalize_generated_code(problem_desc, generated)
 
         passed, exec_error = _exec_with_error(generated, test_code)
         correctness = 1.0 if passed else 0.0
