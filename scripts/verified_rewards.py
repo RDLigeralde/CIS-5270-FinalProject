@@ -2,6 +2,8 @@ import radon.complexity as rc
 import radon.metrics as rm
 import radon.raw as rr
 import ast
+import re
+import textwrap
 
 from dataclasses import dataclass, field
 from typing import Sequence
@@ -66,6 +68,47 @@ def _identifier_dist(lengths: list[int], bins: int = 20) -> list[float]:
         counts[idx] += 1
     total = sum(counts) or 1
     return [c / total for c in counts]
+
+
+def _extract_function_scaffold(problem_description: str) -> tuple[list[str], str] | None:
+    """Extract import lines and the first function signature from prompt text."""
+    lines = problem_description.strip().splitlines()
+    imports: list[str] = []
+    signature: str | None = None
+
+    for line in lines:
+        s = line.strip()
+        if s.startswith(("from ", "import ")):
+            imports.append(s)
+        if signature is None and re.match(r"^def\s+[A-Za-z_][A-Za-z0-9_]*\s*\(.*\)\s*(?:->\s*.*)?\s*:\s*$", s):
+            signature = s
+
+    if signature is None:
+        return None
+    return imports, signature
+
+
+def _to_executable_target(problem_description: str, code: str) -> str:
+    """Convert body-only canonical snippets into full executable function code."""
+    src = code.strip()
+    scaffold = _extract_function_scaffold(problem_description)
+    if scaffold is None:
+        return src
+
+    imports, signature = scaffold
+    if src.lstrip().startswith(signature):
+        return src
+
+    body = textwrap.dedent(code).strip("\n")
+    if not body:
+        body = "pass"
+
+    indented_body = "\n".join(f"    {line}" if line.strip() else "" for line in body.splitlines())
+    function_block = f"{signature}\n{indented_body}"
+
+    if imports:
+        return "\n".join(imports) + "\n\n" + function_block
+    return function_block
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +240,22 @@ def full_static_reward(
 
 if __name__ == "__main__":
     import argparse
-    from scripts.utils import load_jsonl
+    try:
+        from scripts.utils import load_jsonl
+    except ModuleNotFoundError:
+        import os
+        import sys
+
+        # Allow running as: python scripts/verified_rewards.py ...
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+
+        # If another installed package named "scripts" was imported first,
+        # drop it so import resolution can use this repo's scripts package.
+        sys.modules.pop("scripts", None)
+        sys.modules.pop("scripts.utils", None)
+        from scripts.utils import load_jsonl
 
     parser = argparse.ArgumentParser(description="Pre-compute human reference distribution.")
     parser.add_argument("--solutions", default="data_files/llm_solutions.jsonl",
@@ -207,9 +265,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     records = load_jsonl(args.solutions)
-    canonical = [r["prompt"] + r["canonical_solution"] for r in records if r.get("canonical_solution")]
-    print(f"Computing distribution from {len(canonical)} canonical solutions...")
-    dist = HumanDistribution.from_solutions(canonical)
+    canonical_wrapped = [
+        _to_executable_target(r.get("prompt", ""), r["canonical_solution"])
+        for r in records
+        if r.get("canonical_solution")
+    ]
+    print(f"Computing distribution from {len(canonical_wrapped)} wrapped canonical solutions...")
+    dist = HumanDistribution.from_solutions(canonical_wrapped)
     dist.save(args.out)
     print(f"Saved -> {args.out}")
     print(f"  avg_complexity : {dist.avg_complexity:.2f}")

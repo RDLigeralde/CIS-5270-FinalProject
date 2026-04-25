@@ -2,6 +2,8 @@ import sys
 import os
 import threading
 import argparse
+import re
+import textwrap
 from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,6 +13,7 @@ from config import (
     DATA_DIR,
 )
 from scripts.utils import get_openai_client, load_jsonl, save_jsonl
+from scripts.prepare_dataset import _to_executable_target
 from llm_judge import judge_style
 from verified_rewards import static_style_score, HumanDistribution
 
@@ -38,31 +41,92 @@ def _load_model_ids() -> dict[str, str]:
     return ids
 
 
-def _safe_exec(code: str, test_code: str, timeout: int = 10) -> bool:
+def _exec_with_error(code: str, test_code: str, timeout: int = 10) -> tuple[bool, str | None]:
     ns: dict = {}
     passed = [False]
+    error_msg = [None]
+    # add common typing names for annotated model outputs
+    runtime_code = "from typing import *\n\n" + code
 
     def run():
         try:
-            exec(compile(code, "<code>", "exec"), ns)
+            exec(compile(runtime_code, "<code>", "exec"), ns)
             exec(compile(test_code, "<test>", "exec"), ns)
             passed[0] = True
-        except Exception:
-            pass
+        except Exception as exc:
+            error_msg[0] = f"{type(exc).__name__}: {exc}"
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
     t.join(timeout)
-    return passed[0]
+    if t.is_alive():
+        return False, f"TimeoutError: execution exceeded {timeout}s"
+    return passed[0], error_msg[0]
 
 
 def _strip_fences(code: str) -> str:
-    lines = code.strip().splitlines()
-    if lines and lines[0].strip().startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines)
+    """Best-effort extraction of Python source from chatty model output."""
+    text = code.strip()
+
+    # Prefer fenced code blocks when present.
+    fenced = re.findall(r"```(?:python)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    if fenced:
+        return fenced[0].strip()
+
+    # If the model added explanations before code, cut to first likely code line.
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        s = line.lstrip()
+        if s.startswith(("from ", "import ", "def ", "class ", "@", "if __name__")):
+            return "\n".join(lines[i:]).strip()
+
+    # Fallback: return raw text so downstream logging still captures the output.
+    return text
+
+
+def _extract_function_scaffold(problem_desc: str) -> tuple[list[str], str] | None:
+    """Extract imports and first function signature from the prompt block."""
+    lines = problem_desc.strip().splitlines()
+    imports: list[str] = []
+    signature: str | None = None
+
+    for line in lines:
+        s = line.strip()
+        if s.startswith(("from ", "import ")):
+            imports.append(s)
+        if signature is None and re.match(r"^def\s+[A-Za-z_][A-Za-z0-9_]*\s*\(.*\)\s*:\s*$", s):
+            signature = s
+
+    if signature is None:
+        return None
+    return imports, signature
+
+
+def _normalize_generated_code(problem_desc: str, generated: str) -> str:
+    """Best-effort recovery for fragment outputs that are not full function definitions."""
+    src = generated.strip()
+    if not src:
+        return src
+
+    # Already a full function output.
+    if re.search(r"^\s*def\s+", src, flags=re.MULTILINE):
+        return src
+
+    scaffold = _extract_function_scaffold(problem_desc)
+    if scaffold is None:
+        return src
+
+    imports, signature = scaffold
+    body = textwrap.dedent(src).strip("\n")
+    if not body:
+        body = "pass"
+    indented = "\n".join(f"    {line}" if line.strip() else "" for line in body.splitlines())
+    wrapped = f"{signature}\n{indented}"
+
+    # Avoid duplicate import lines when model already emitted them in fragment text.
+    if imports:
+        return "\n".join(imports) + "\n\n" + wrapped
+    return wrapped
 
 
 def generate_refactored(
@@ -74,6 +138,11 @@ def generate_refactored(
     try:
         user_msg = (
             f"Refactor the following LLM-written solution to be more idiomatic and human-like.\n\n"
+            # "Output only one complete Python function with the same signature.\n"
+            # "- Return exactly one top-level function definition.\n"
+            # "- Keep the same function name and parameter list.\n"
+            # "- Keep behavior identical to the original solution.\n"
+            # "- Output executable Python code only.\n\n"
             f"Problem:\n{problem_desc.strip()}\n\n"
             f"LLM solution:\n```python\n{llm_code.strip()}\n```"
         )
@@ -98,13 +167,15 @@ def evaluate_model(
     test_problems: list[dict],
     human_dist: HumanDistribution,
     label: str,
+    case_records: list[dict] | None = None,
+    only_failures: bool = False,
 ) -> dict:
     """Run full evaluation for one model deployment. Returns aggregate metrics."""
     correctness_scores, llm_style_scores, static_style_scores, rewards = [], [], [], []
 
     for p in tqdm(test_problems, desc=f"  {label}", leave=False):
         problem_desc = p["prompt"]
-        canonical = p["canonical_solution"]
+        canonical = _to_executable_target(problem_desc, p["canonical_solution"])
         test_code = p["test_code"]
 
         # Use the first verbose LLM solution input to refactor
@@ -116,11 +187,30 @@ def evaluate_model(
         generated = generate_refactored(client, deployment, problem_desc, input_code)
         if generated is None:
             continue
+        # generated = _normalize_generated_code(problem_desc, generated)
 
-        correctness = 1.0 if _safe_exec(generated, test_code) else 0.0
+        passed, exec_error = _exec_with_error(generated, test_code)
+        correctness = 1.0 if passed else 0.0
         llm_style = judge_style(client, problem_desc, canonical, generated)
         static_style = static_style_score(generated, human_dist)
         reward = CORRECTNESS_WEIGHT * correctness + STYLE_WEIGHT * llm_style
+
+        if case_records is not None and (not only_failures or not passed):
+            case_records.append({
+                "model": label,
+                "deployment": deployment,
+                "task_id": p.get("task_id", ""),
+                "passed": passed,
+                "exec_error": exec_error,
+                "correctness": correctness,
+                "llm_style": llm_style,
+                "static_style": static_style,
+                "reward": reward,
+                "prompt": problem_desc,
+                "input_code": input_code,
+                "generated_code": generated,
+                "canonical_solution": canonical,
+            })
 
         correctness_scores.append(correctness)
         llm_style_scores.append(llm_style)
@@ -157,7 +247,7 @@ def print_table(results: list[dict]) -> None:
     print("=" * len(header))
 
 
-def main(n_problems: int = 50):
+def main(n_problems: int = 50, dump_cases_path: str | None = None, only_failures: bool = False):
     client = get_openai_client()
     model_ids = _load_model_ids()
     print(f"Models to evaluate: {list(model_ids.keys())}")
@@ -188,9 +278,11 @@ def main(n_problems: int = 50):
         human_dist.save(HUMAN_DIST_FILE)
 
     results = []
+    case_records: list[dict] | None = [] if dump_cases_path else None
     for label, deployment in model_ids.items():
         print(f"\nEvaluating {label} ({deployment})...")
-        metrics = evaluate_model(client, deployment, test_problems, human_dist, label)
+        metrics = evaluate_model(client, deployment, test_problems, human_dist, label,
+                                 case_records=case_records, only_failures=only_failures)
         results.append(metrics)
         print(
             f"  correctness={metrics['correctness']:.3f}  "
@@ -201,10 +293,15 @@ def main(n_problems: int = 50):
     print_table(results)
     save_jsonl(results, RESULTS_FILE)
     print(f"\nFull results saved -> {RESULTS_FILE}")
+    if dump_cases_path and case_records is not None:
+        save_jsonl(case_records, dump_cases_path)
+        print(f"Case-level debug saved -> {dump_cases_path}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", type=int, default=50, help="Number of test problems")
+    parser.add_argument("--dump-cases", default=None, help="Optional JSONL path to dump per-case generated outputs and pass/fail details")
+    parser.add_argument("--only-failures", action="store_true", default=False, help="When used with --dump-cases, save only failed cases")
     args = parser.parse_args()
-    main(n_problems=args.n)
+    main(n_problems=args.n, dump_cases_path=args.dump_cases, only_failures=args.only_failures)

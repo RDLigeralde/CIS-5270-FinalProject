@@ -17,6 +17,8 @@ import sys
 import os
 import random
 import argparse
+import re
+import textwrap
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
@@ -38,14 +40,57 @@ SYSTEM_PROMPT = (
 def _user_message(problem_description: str, llm_code: str) -> str:
     return (
         f"Refactor the following LLM-written solution to be more idiomatic and human-like.\n"
-        f"The solution must remain functionally correct.\n\n"
+        f"The solution must remain functionally correct.\n"
+        f"Output exactly one complete top-level function definition with the same name and parameters.\n\n"
         f"Problem:\n{problem_description.strip()}\n\n"
         f"LLM solution to refactor:\n```python\n{llm_code.strip()}\n```"
     )
 
 
-def _assistant_message(code: str) -> str:
-    return f"```python\n{code.strip()}\n```"
+def _extract_function_scaffold(problem_description: str) -> tuple[list[str], str] | None:
+    """Extract import lines and the first function signature from the prompt text."""
+    lines = problem_description.strip().splitlines()
+    imports: list[str] = []
+    signature: str | None = None
+
+    for line in lines:
+        s = line.strip()
+        if s.startswith(("from ", "import ")):
+            imports.append(s)
+        if signature is None and re.match(r"^def\s+[A-Za-z_][A-Za-z0-9_]*\s*\(.*\)\s*(?:->\s*.*)?\s*:\s*$", s):
+            signature = s
+
+    if signature is None:
+        return None
+    return imports, signature
+
+
+def _to_executable_target(problem_description: str, code: str) -> str:
+    """Convert canonical body-only references into full executable function code."""
+    src = code.strip()
+    scaffold = _extract_function_scaffold(problem_description)
+    if scaffold is None:
+        return src
+
+    imports, signature = scaffold
+    if src.lstrip().startswith(signature):
+        return src
+
+    body = textwrap.dedent(code).strip("\n")
+    if not body:
+        body = "pass"
+
+    indented_body = "\n".join(f"    {line}" if line.strip() else "" for line in body.splitlines())
+    function_block = f"{signature}\n{indented_body}"
+
+    if imports:
+        return "\n".join(imports) + "\n\n" + function_block
+    return function_block
+
+
+def _assistant_message(problem_description: str, code: str) -> str:
+    target = _to_executable_target(problem_description, code)
+    return f"```python\n{target}\n```"
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +113,7 @@ def make_sft_records(problems: list[dict]) -> list[dict]:
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": _user_message(problem_desc, sol["code"])},
-                    {"role": "assistant", "content": _assistant_message(canonical)},
+                    {"role": "assistant", "content": _assistant_message(problem_desc, canonical)},
                 ]
             })
     return records
@@ -104,10 +149,10 @@ def make_dpo_records(problems: list[dict]) -> list[dict]:
                     ]
                 },
                 "preferred_output": [
-                    {"role": "assistant", "content": _assistant_message(canonical)}
+                    {"role": "assistant", "content": _assistant_message(problem_desc, canonical)}
                 ],
                 "non_preferred_output": [
-                    {"role": "assistant", "content": _assistant_message(sol["code"])}
+                    {"role": "assistant", "content": _assistant_message(problem_desc, sol["code"])}
                 ],
                 "_pair_type": "style",
             })
@@ -125,10 +170,10 @@ def make_dpo_records(problems: list[dict]) -> list[dict]:
                     ]
                 },
                 "preferred_output": [
-                    {"role": "assistant", "content": _assistant_message(chosen_sol["code"])}
+                    {"role": "assistant", "content": _assistant_message(problem_desc, chosen_sol["code"])}
                 ],
                 "non_preferred_output": [
-                    {"role": "assistant", "content": _assistant_message(rejected_sol["code"])}
+                    {"role": "assistant", "content": _assistant_message(problem_desc, rejected_sol["code"])}
                 ],
                 "_pair_type": "correctness",
             })
@@ -158,7 +203,7 @@ def make_rft_records(problems: list[dict]) -> list[dict]:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": _user_message(problem_desc, sol["code"])},
                 ],
-                "reference_solution": canonical,
+                "reference_solution": _to_executable_target(problem_desc, canonical),
                 "test_code": test_code,
                 "problem_description": problem_desc,
             })
