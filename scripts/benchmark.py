@@ -12,7 +12,7 @@ from config import (
     DATA_DIR,
 )
 from scripts.utils import get_openai_client, load_jsonl, save_jsonl
-from scripts.prepare_dataset import _to_executable_target
+from scripts.prepare_datasets import _to_executable_target
 from llm_judge import judge_style
 from verified_rewards import static_style_score, HumanDistribution
 

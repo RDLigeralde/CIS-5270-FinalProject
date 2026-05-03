@@ -12,7 +12,7 @@ AZURE_RESOURCE_GROUP_NAME = "CIS-5270"
 
 # Models
 TEACHER_MODEL = "gpt-4.1-mini" # Generates LLM DPO examples and judge in LLM-as-judge
-STUDENT_MODEL = "gpt-4.1-nano-2025-04-14"  # Fine-tuned model
+STUDENT_MODEL = "gpt-4.1-nano"  # Fine-tuned model
 
 # Dataset paths
 DATA_DIR              = "data_files"

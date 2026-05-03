@@ -112,14 +112,49 @@ def wait_for_job(
     wandb_logger: "WandbLogger | None" = None,
 ) -> object:
     """Poll a fine-tuning job until it reaches a terminal state."""
+    seen_steps: set[int] = set()
     while True:
         job = client.fine_tuning.jobs.retrieve(job_id)
         print(f"  [{job_id}] status: {job.status}")
         if wandb_logger:
             wandb_logger.log({"job/status_code": _status_to_int(job.status)})
+            _log_new_events(client, job_id, wandb_logger, seen_steps)
         if job.status in ("succeeded", "failed", "cancelled"):
             return job
         time.sleep(poll_interval)
+
+
+def _log_new_events(
+    client: AzureOpenAI,
+    job_id: str,
+    wandb_logger: "WandbLogger",
+    seen_steps: set[int],
+) -> None:
+    """Stream step-level metrics from fine-tuning events into wandb."""
+    try:
+        for event in client.fine_tuning.jobs.list_events(job_id, limit=100):
+            data = getattr(event, "data", None) or {}
+            if not isinstance(data, dict):
+                continue
+            raw_step = data.get("step")
+            if raw_step is None:
+                continue
+            step = int(raw_step)
+            if step in seen_steps:
+                continue
+            seen_steps.add(step)
+            metrics: dict = {"azure_step": step}
+            for k, v in data.items():
+                if k == "step" or v is None:
+                    continue
+                try:
+                    metrics[_SFT_COLUMN_MAP.get(k, k)] = float(v)
+                except (ValueError, TypeError):
+                    pass
+            if len(metrics) > 1:
+                wandb_logger.log(metrics)
+    except Exception as exc:
+        print(f"  Warning: could not fetch training events: {exc}")
 
 
 def _status_to_int(status: str) -> int:

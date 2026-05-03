@@ -16,14 +16,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-CONDA_ENV="mft"
-
-# Activate conda env if not already active
-if [[ "${CONDA_DEFAULT_ENV:-}" != "$CONDA_ENV" ]]; then
-  CONDA_BASE="$(conda info --base 2>/dev/null)" || { echo "conda not found"; exit 1; }
-  source "$CONDA_BASE/etc/profile.d/conda.sh"
-  conda activate "$CONDA_ENV"
+if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+  source mft/bin/activate
 fi
+unset SSL_CERT_FILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE
 
 export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 
@@ -85,7 +81,9 @@ case "$TARGET" in
     echo "  prepare                          Build SFT / DPO / RFT datasets"
     echo "  human_dist                       Pre-compute human reference distribution"
     echo "  sft         [--no-wait] [--no-wandb] [--project P] [--experiment N]"
+    echo "              [--epochs N] [--batch-size N] [--lr-multiplier F]"
     echo "  dpo         [--base-model ID] [--no-wandb] [--project P] [--experiment N]"
+    echo "              [--epochs N] [--batch-size N] [--lr-multiplier F]"
     echo "  rft         [--base-model ID] [--gated-style] [--no-wandb] [--project P] [--experiment N]"
     echo "  benchmark   [--n N]              Evaluate all models (default: 50 problems)"
     echo "  all         [--n N]              Run full pipeline end-to-end"

@@ -26,11 +26,18 @@ def _load_model_id(path: str, fallback: str) -> str:
 
 
 def run_dpo(base_model: str | None = None, wait: bool = True, no_wandb: bool = False,
-            project: str = WANDB_PROJECT, experiment: str | None = None) -> str:
+            project: str = WANDB_PROJECT, experiment: str | None = None,
+            n_epochs: int | None = None,
+            batch_size: int | None = None,
+            lr_multiplier: float | None = None) -> str:
     client = get_openai_client()
 
     if base_model is None:
         base_model = _load_model_id(SFT_MODEL_ID_PATH, STUDENT_MODEL)
+
+    n_epochs = DPO_EPOCHS if n_epochs is None else n_epochs
+    batch_size = BATCH_SIZE if batch_size is None else batch_size
+    lr_multiplier = LR_MULTIPLIER if lr_multiplier is None else lr_multiplier
 
     wb = WandbLogger(
         project=project,
@@ -38,9 +45,9 @@ def run_dpo(base_model: str | None = None, wait: bool = True, no_wandb: bool = F
         config={
             "job_type": "dpo",
             "base_model": base_model,
-            "n_epochs": DPO_EPOCHS,
-            "batch_size": BATCH_SIZE,
-            "lr_multiplier": LR_MULTIPLIER,
+            "n_epochs": n_epochs,
+            "batch_size": batch_size,
+            "lr_multiplier": lr_multiplier,
         },
         disabled=no_wandb,
     )
@@ -48,6 +55,7 @@ def run_dpo(base_model: str | None = None, wait: bool = True, no_wandb: bool = F
 
     print("=== DPO Training ===")
     print(f"Base model: {base_model}")
+    print(f"Hyperparameters: epochs={n_epochs}, batch_size={batch_size}, lr_multiplier={lr_multiplier}")
 
     train_id = upload_file(client, DPO_TRAIN_FILE)
     val_id = upload_file(client, DPO_VAL_FILE)
@@ -61,9 +69,9 @@ def run_dpo(base_model: str | None = None, wait: bool = True, no_wandb: bool = F
             "type": "dpo",
             "dpo": {
                 "hyperparameters": {
-                    "n_epochs": DPO_EPOCHS,
-                    "batch_size": BATCH_SIZE,
-                    "learning_rate_multiplier": LR_MULTIPLIER,
+                    "n_epochs": n_epochs,
+                    "batch_size": batch_size,
+                    "learning_rate_multiplier": lr_multiplier,
                 }
             },
         },
@@ -79,6 +87,9 @@ def run_dpo(base_model: str | None = None, wait: bool = True, no_wandb: bool = F
 
     completed = wait_for_job(client, job.id, wandb_logger=wb)
     if completed.status != "succeeded":
+        print(f"\nJob failed. Fetching events for {job.id}...")
+        for ev in client.fine_tuning.jobs.list_events(job.id, limit=20):
+            print(f"  [{getattr(ev, 'level', '?')}] {getattr(ev, 'message', ev)}")
         wb.finish()
         raise RuntimeError(f"DPO job {job.id} ended with status: {completed.status}")
 
@@ -106,6 +117,13 @@ if __name__ == "__main__":
                         help="Disable Weights & Biases logging")
     parser.add_argument("--project", default=WANDB_PROJECT, help="W&B project name")
     parser.add_argument("--experiment", default=None, help="W&B run name")
+    parser.add_argument("--epochs", type=int, default=None,
+                        help=f"Override DPO epochs (default from config = {DPO_EPOCHS})")
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help=f"Override DPO batch size (default from config = {BATCH_SIZE})")
+    parser.add_argument("--lr-multiplier", type=float, default=None,
+                        help=f"Override DPO learning rate multiplier (default from config = {LR_MULTIPLIER})")
     args = parser.parse_args()
     run_dpo(base_model=args.base_model, wait=args.wait, no_wandb=args.no_wandb,
-            project=args.project, experiment=args.experiment)
+            project=args.project, experiment=args.experiment,
+            n_epochs=args.epochs, batch_size=args.batch_size, lr_multiplier=args.lr_multiplier)
