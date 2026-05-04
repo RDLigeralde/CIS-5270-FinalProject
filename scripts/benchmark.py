@@ -1,5 +1,6 @@
 import sys
 import os
+import random
 import threading
 import argparse
 import re
@@ -20,6 +21,7 @@ from evalplus.data import get_human_eval_plus
 from tqdm import tqdm
 
 RESULTS_FILE = f"{DATA_DIR}/benchmark_results.jsonl"
+SAMPLES_FILE = f"{DATA_DIR}/benchmark_samples.jsonl"
 HUMAN_DIST_FILE = f"{DATA_DIR}/human_dist.json"
 
 SYSTEM_PROMPT = (
@@ -195,7 +197,8 @@ def print_table(results: list[dict]) -> None:
     print("=" * len(header))
 
 
-def main(n_problems: int = 50, dump_cases_path: str | None = None, only_failures: bool = False):
+
+def main(n_problems: int = 50, dump_cases_path: str | None = None, only_failures: bool = False, n_samples: int = 0):
     client = get_openai_client()
     model_ids = _load_model_ids()
     print(f"Models to evaluate: {list(model_ids.keys())}")
@@ -226,24 +229,32 @@ def main(n_problems: int = 50, dump_cases_path: str | None = None, only_failures
         human_dist.save(HUMAN_DIST_FILE)
 
     results = []
-    case_records: list[dict] | None = [] if dump_cases_path else None
+    all_case_records: list[dict] = []
     for label, deployment in model_ids.items():
         print(f"\nEvaluating {label} ({deployment})...")
+        model_records: list[dict] | None = [] if (dump_cases_path or n_samples > 0) else None
         metrics = evaluate_model(client, deployment, test_problems, human_dist, label,
-                                 case_records=case_records, only_failures=only_failures)
+                                 case_records=model_records, only_failures=only_failures)
         results.append(metrics)
         print(
             f"  correctness={metrics['correctness']:.3f}  "
             f"llm_style={metrics['llm_style']:.3f}  "
             f"reward={metrics['reward']:.3f}"
         )
-
+        if model_records:
+            all_case_records.extend(model_records)
     print_table(results)
     save_jsonl(results, RESULTS_FILE)
     print(f"\nFull results saved -> {RESULTS_FILE}")
-    if dump_cases_path and case_records is not None:
-        save_jsonl(case_records, dump_cases_path)
+    if dump_cases_path:
+        save_jsonl(all_case_records, dump_cases_path)
         print(f"Case-level debug saved -> {dump_cases_path}")
+    if n_samples > 0 and all_case_records:
+        task_ids = list({r["task_id"] for r in all_case_records})
+        sampled_ids = set(random.sample(task_ids, min(n_samples, len(task_ids))))
+        samples = [r for r in all_case_records if r["task_id"] in sampled_ids]
+        save_jsonl(samples, SAMPLES_FILE)
+        print(f"Samples saved -> {SAMPLES_FILE}")
 
 
 if __name__ == "__main__":
@@ -251,5 +262,7 @@ if __name__ == "__main__":
     parser.add_argument("--n", type=int, default=50, help="Number of test problems")
     parser.add_argument("--dump-cases", default=None, help="Optional JSONL path to dump per-case generated outputs and pass/fail details")
     parser.add_argument("--only-failures", action="store_true", default=False, help="When used with --dump-cases, save only failed cases")
+    parser.add_argument("--samples", type=int, default=0, metavar="K", help=f"Save K random sample outputs to {SAMPLES_FILE}")
     args = parser.parse_args()
-    main(n_problems=args.n, dump_cases_path=args.dump_cases, only_failures=args.only_failures)
+    main(n_problems=args.n, dump_cases_path=args.dump_cases, only_failures=args.only_failures,
+         n_samples=args.samples)
